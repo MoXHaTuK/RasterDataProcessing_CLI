@@ -3,6 +3,9 @@
 #include <cstring>
 #include <algorithm>
 #include <iostream>
+#include <tiffio.h> 
+#include <cmath> 
+
 
 #pragma pack(push,1)
 struct BMPFileHeader {
@@ -36,21 +39,21 @@ static std::string getExtension(const std::string& path) {
     return ext;
 }
 
-bool ImageManager::loadImage(const std::string& path, Image& img) {
-    auto ext = getExtension(path);
-    if (ext == "bmp") {
-        return loadBMP(path, img);
-    }
-    std::cerr << "Unsupported format: " << ext << std::endl;
+bool ImageManager::loadImage(const std::string& p, Image& img)
+{
+    auto ext = getExtension(p);
+    if (ext == "bmp")  return loadBMP(p, img);
+    if (ext == "tif" || ext == "tiff") return loadTIFF(p, img);
+    std::cerr << "Unsupported format: " << ext << '\n';
     return false;
 }
 
-bool ImageManager::saveImage(const std::string& path, const Image& img) {
-    auto ext = getExtension(path);
-    if (ext == "bmp") {
-        return saveBMP(path, img);
-    }
-    std::cerr << "Unsupported format: " << ext << std::endl;
+bool ImageManager::saveImage(const std::string& p, const Image& img)
+{
+    auto ext = getExtension(p);
+    if (ext == "bmp")  return saveBMP(p, img);
+    if (ext == "tif" || ext == "tiff") return saveTIFF(p, img);
+    std::cerr << "Unsupported format: " << ext << '\n';
     return false;
 }
 
@@ -146,5 +149,72 @@ bool ImageManager::saveBMP(const std::string& path, const Image& img) {
         out.write(reinterpret_cast<const char*>(pad), padding);
     }
     out.close();
+    return true;
+}
+
+bool ImageManager::loadTIFF(const std::string& path, Image& img)
+{
+    TIFF* tif = TIFFOpen(path.c_str(), "r");
+    if (!tif) { std::cerr << "TIFFOpen failed\n"; return false; }
+
+    uint32 w, h;
+    uint16 spp, bpp, photo, planar;
+    TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &w);
+    TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &h);
+    TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &spp);
+    TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &bpp);
+    TIFFGetFieldDefaulted(tif, TIFFTAG_PHOTOMETRIC, &photo);
+    TIFFGetFieldDefaulted(tif, TIFFTAG_PLANARCONFIG, &planar);
+
+    if (bpp != 8 || (photo != PHOTOMETRIC_RGB && photo != PHOTOMETRIC_MINISBLACK))
+    {
+        std::cerr << "Only 8-bit RGB or grayscale TIFF supported\n";
+        TIFFClose(tif); return false;
+    }
+    img.width = w;
+    img.height = h;
+    img.channels = spp;              // 1 or 3
+    img.data.resize(w * h * spp);
+
+    // read line by line into img.data (interleaved)
+    tsize_t scanlineSize = TIFFScanlineSize(tif);
+    std::vector<uint8_t> line(scanlineSize);
+
+    for (uint32 y = 0; y < h; ++y) {
+        uint32 row = planar == PLANARCONFIG_CONTIG ? y : h - 1 - y;  // handle orientation if needed
+        if (TIFFReadScanline(tif, line.data(), row, 0) < 0) {
+            std::cerr << "TIFFReadScanline failed\n"; TIFFClose(tif); return false;
+        }
+        std::memcpy(&img.data[y * w * spp], line.data(), w * spp);
+    }
+    TIFFClose(tif);
+    return true;
+}
+
+bool ImageManager::saveTIFF(const std::string& path, const Image& img)
+{
+    TIFF* tif = TIFFOpen(path.c_str(), "w");
+    if (!tif) { std::cerr << "TIFFOpen write failed\n"; return false; }
+
+    TIFFSetField(tif, TIFFTAG_IMAGEWIDTH, img.width);
+    TIFFSetField(tif, TIFFTAG_IMAGELENGTH, img.height);
+    TIFFSetField(tif, TIFFTAG_SAMPLESPERPIXEL, img.channels);
+    TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
+    TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
+    TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC,
+        img.channels == 1 ? PHOTOMETRIC_MINISBLACK : PHOTOMETRIC_RGB);
+
+    tsize_t linebytes = img.width * img.channels;
+    std::vector<uint8_t> buf(linebytes);
+
+    for (int y = 0; y < img.height; ++y)
+    {
+        std::memcpy(buf.data(), &img.data[y * linebytes], linebytes);
+        if (TIFFWriteScanline(tif, buf.data(), y, 0) < 0) {
+            std::cerr << "TIFFWriteScanline failed\n"; TIFFClose(tif); return false;
+        }
+    }
+    TIFFClose(tif);
     return true;
 }

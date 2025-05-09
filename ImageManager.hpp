@@ -13,6 +13,8 @@ class ImageManager {
 public:
     static bool loadImage(const std::string& path, Image& img);
     static bool saveImage(const std::string& path, const Image& img);
+    static bool loadTIFF(const std::string & path, Image & img);
+    static bool saveTIFF(const std::string & path, const Image & img);
 private:
     static bool loadBMP(const std::string& path, Image& img);
     static bool saveBMP(const std::string& path, const Image& img);
