@@ -1,10 +1,18 @@
 #include "ImageManager.hpp"
-#include <fstream>
-#include <cstring>
+
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
 #include <iostream>
-#include <tiffio.h> 
-#include <cmath> 
+#include <vector>
+
+#include <png.h>
+#include <tiffio.h>
+//#include <geotiff.h>
+//#include <geo_normalize.h>
 
 
 #pragma pack(push,1)
@@ -31,6 +39,16 @@ struct BMPInfoHeader {
 };
 #pragma pack(pop)
 
+static std::string toLowerExt(const std::string& path)
+{
+    auto pos = path.find_last_of('.');
+    if (pos == std::string::npos) return "";
+    std::string ext = path.substr(pos + 1);
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    return ext;
+}
+
 static std::string getExtension(const std::string& path) {
     auto pos = path.find_last_of('.');
     if (pos == std::string::npos) return "";
@@ -41,18 +59,19 @@ static std::string getExtension(const std::string& path) {
 
 bool ImageManager::loadImage(const std::string& p, Image& img)
 {
-    auto ext = getExtension(p);
-    if (ext == "bmp")  return loadBMP(p, img);
-    if (ext == "tif" || ext == "tiff") return loadTIFF(p, img);
+    std::string ext = toLowerExt(p);
+    if (ext=="bmp")  return loadBMP (p,img);
+    if (ext=="png")  return loadPNG (p,img);
+    if (ext=="tif" || ext=="tiff") return loadTIFF(p,img);   // includes GeoTIFF
     std::cerr << "Unsupported format: " << ext << '\n';
     return false;
 }
-
-bool ImageManager::saveImage(const std::string& p, const Image& img)
+bool ImageManager::saveImage(const std::string& p,const Image& img)
 {
-    auto ext = getExtension(p);
-    if (ext == "bmp")  return saveBMP(p, img);
-    if (ext == "tif" || ext == "tiff") return saveTIFF(p, img);
+    std::string ext = toLowerExt(p);
+    if (ext=="bmp")  return saveBMP (p,img);
+    if (ext=="png")  return savePNG (p,img);
+    if (ext=="tif" || ext=="tiff") return saveTIFF(p,img);
     std::cerr << "Unsupported format: " << ext << '\n';
     return false;
 }
@@ -66,7 +85,7 @@ bool ImageManager::loadBMP(const std::string& path, Image& img) {
     in.read(reinterpret_cast<char*>(&fileHeader), sizeof(fileHeader));
     in.read(reinterpret_cast<char*>(&infoHeader), sizeof(infoHeader));
 
-    if (fileHeader.bfType != 0x4D42) return false; // 'BM'
+    if (fileHeader.bfType != 0x4D42) return false;
     if (infoHeader.biBitCount != 24) {
         std::cerr << "Only 24-bit BMP supported" << std::endl;
         return false;
@@ -152,40 +171,108 @@ bool ImageManager::saveBMP(const std::string& path, const Image& img) {
     return true;
 }
 
+bool ImageManager::loadPNG(const std::string& path, Image& img)
+{
+    FILE* fp = nullptr; 
+    if (fopen_s(&fp, path.c_str(), "rb") || !fp) {
+        std::cerr << "Cannot open PNG\n"; 
+        return false;
+    }
+
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) { fclose(fp); return false; }
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_read_struct(&png, nullptr, nullptr); fclose(fp); return false; }
+
+    if (setjmp(png_jmpbuf(png))) { png_destroy_read_struct(&png, &info, nullptr); fclose(fp); return false; }
+
+    png_init_io(png, fp);
+    png_read_info(png, info);
+
+    png_uint_32 w, h; int bitDepth, colorType;
+    png_get_IHDR(png, info, &w, &h, &bitDepth, &colorType, nullptr, nullptr, nullptr);
+    if (bitDepth != 8) {
+        std::cerr << "Only 8-bit PNG supported\n";
+        png_destroy_read_struct(&png, &info, nullptr); fclose(fp); return false;
+    }
+
+    if (colorType == PNG_COLOR_TYPE_PALETTE)   png_set_palette_to_rgb(png);
+    if (colorType == PNG_COLOR_TYPE_GRAY && bitDepth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+    if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA)
+        png_set_gray_to_rgb(png);
+
+    png_read_update_info(png, info);
+
+    img.width = static_cast<int>(w);
+    img.height = static_cast<int>(h);
+    img.channels = png_get_channels(png, info);    // will be 3 (RGB) or 4 (RGBA)
+    if (img.channels == 4) { png_set_strip_alpha(png); img.channels = 3; }
+
+    img.data.resize(w * h * img.channels);
+
+    std::vector<png_bytep> rows(h);
+    for (size_t y = 0;y < h;++y) rows[y] = img.data.data() + y * w * img.channels;
+    png_read_image(png, rows.data());
+
+    png_destroy_read_struct(&png, &info, nullptr);
+    fclose(fp);
+    return true;
+}
+
+bool ImageManager::savePNG(const std::string& path, const Image& img)
+{
+    FILE* fp = nullptr;
+    if (fopen_s(&fp, path.c_str(), "rb") || !fp) {
+        std::cerr << "Cannot open PNG\n";
+        return false;
+    }
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) { fclose(fp); return false; }
+    png_infop info = png_create_info_struct(png);
+    if (!info) { png_destroy_write_struct(&png, nullptr); fclose(fp); return false; }
+
+    if (setjmp(png_jmpbuf(png))) { png_destroy_write_struct(&png, &info); fclose(fp); return false; }
+
+    png_init_io(png, fp);
+    png_set_IHDR(png, info, img.width, img.height,
+        8, PNG_COLOR_TYPE_RGB, PNG_INTERLACE_NONE,
+        PNG_COMPRESSION_TYPE_BASE, PNG_FILTER_TYPE_BASE);
+    png_write_info(png, info);
+
+    std::vector<png_bytep> rows(img.height);
+    for (int y = 0;y < img.height;++y) rows[y] = const_cast<png_bytep>(
+        img.data.data() + y * img.width * img.channels);
+    png_write_image(png, rows.data());
+    png_write_end(png, nullptr);
+
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+    return true;
+}
+
 bool ImageManager::loadTIFF(const std::string& path, Image& img)
 {
     TIFF* tif = TIFFOpen(path.c_str(), "r");
     if (!tif) { std::cerr << "TIFFOpen failed\n"; return false; }
 
-    uint32 w, h;
-    uint16 spp, bpp, photo, planar;
+    uint32_t w, h; uint16_t spp, bpp, photo;
     TIFFGetField(tif, TIFFTAG_IMAGEWIDTH, &w);
     TIFFGetField(tif, TIFFTAG_IMAGELENGTH, &h);
     TIFFGetField(tif, TIFFTAG_SAMPLESPERPIXEL, &spp);
     TIFFGetField(tif, TIFFTAG_BITSPERSAMPLE, &bpp);
     TIFFGetFieldDefaulted(tif, TIFFTAG_PHOTOMETRIC, &photo);
-    TIFFGetFieldDefaulted(tif, TIFFTAG_PLANARCONFIG, &planar);
+    if (bpp != 8) { std::cerr << "Only 8-bit TIFF supported\n"; TIFFClose(tif); return false; }
 
-    if (bpp != 8 || (photo != PHOTOMETRIC_RGB && photo != PHOTOMETRIC_MINISBLACK))
-    {
-        std::cerr << "Only 8-bit RGB or grayscale TIFF supported\n";
-        TIFFClose(tif); return false;
-    }
-    img.width = w;
-    img.height = h;
-    img.channels = spp;              // 1 or 3
-    img.data.resize(w * h * spp);
+    img.width = w; img.height = h; img.channels = spp;
+    img.data.resize(static_cast<size_t>(w) * h * spp);
 
-    // read line by line into img.data (interleaved)
-    tsize_t scanlineSize = TIFFScanlineSize(tif);
-    std::vector<uint8_t> line(scanlineSize);
-
-    for (uint32 y = 0; y < h; ++y) {
-        uint32 row = planar == PLANARCONFIG_CONTIG ? y : h - 1 - y;  // handle orientation if needed
-        if (TIFFReadScanline(tif, line.data(), row, 0) < 0) {
-            std::cerr << "TIFFReadScanline failed\n"; TIFFClose(tif); return false;
-        }
-        std::memcpy(&img.data[y * w * spp], line.data(), w * spp);
+    tsize_t linebytes = TIFFScanlineSize(tif);
+    std::vector<uint8_t> buf(linebytes);
+    for (uint32_t y = 0;y < h;++y) {
+        if (TIFFReadScanline(tif, buf.data(), y, 0) < 0) { TIFFClose(tif); return false; }
+        std::memcpy(&img.data[y * linebytes], buf.data(), linebytes);
     }
     TIFFClose(tif);
     return true;
@@ -202,17 +289,13 @@ bool ImageManager::saveTIFF(const std::string& path, const Image& img)
     TIFFSetField(tif, TIFFTAG_BITSPERSAMPLE, 8);
     TIFFSetField(tif, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
     TIFFSetField(tif, TIFFTAG_PLANARCONFIG, PLANARCONFIG_CONTIG);
-    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC,
-        img.channels == 1 ? PHOTOMETRIC_MINISBLACK : PHOTOMETRIC_RGB);
+    TIFFSetField(tif, TIFFTAG_PHOTOMETRIC, img.channels == 1 ? PHOTOMETRIC_MINISBLACK : PHOTOMETRIC_RGB);
 
-    tsize_t linebytes = img.width * img.channels;
-    std::vector<uint8_t> buf(linebytes);
-
-    for (int y = 0; y < img.height; ++y)
-    {
-        std::memcpy(buf.data(), &img.data[y * linebytes], linebytes);
-        if (TIFFWriteScanline(tif, buf.data(), y, 0) < 0) {
-            std::cerr << "TIFFWriteScanline failed\n"; TIFFClose(tif); return false;
+    tsize_t stride = static_cast<tsize_t>(img.width) * img.channels;
+    for (int y = 0;y < img.height;++y) {
+        if (TIFFWriteScanline(tif,
+            const_cast<uint8_t*>(&img.data[y * stride]), y, 0) < 0) {
+            TIFFClose(tif); return false;
         }
     }
     TIFFClose(tif);
