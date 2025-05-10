@@ -49,6 +49,7 @@
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\user\source\repos\RasterDataProcessing_CLI\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -68,6 +69,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>C:\Users\user\source\repos\RasterDataProcessing_CLI\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -85,13 +87,22 @@
     <CudaCompile Include="CudaKernels.cu" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CLIParser.cpp" />
+    <ClCompile Include="CommandManager.cpp" />
     <ClCompile Include="ImageManager.cpp">
       <AdditionalIncludeDirectories Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">C:\Users\user\source\repos\RasterDataProcessing_CLI\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <ClCompile Include="KernelWrappers.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="OperationController.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CLIParser.hpp" />
+    <ClInclude Include="CommandManager.hpp" />
     <ClInclude Include="ImageManager.hpp" />
+    <ClInclude Include="KernelWrappers.hpp" />
+    <ClInclude Include="OperationController.hpp" />
+    <ClInclude Include="Task.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="vcpkg.json" />

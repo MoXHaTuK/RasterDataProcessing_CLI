@@ -23,9 +23,36 @@
     <ClCompile Include="ImageManager.cpp">
       <Filter>Sources</Filter>
     </ClCompile>
+    <ClCompile Include="CLIParser.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
+    <ClCompile Include="CommandManager.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
+    <ClCompile Include="KernelWrappers.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
+    <ClCompile Include="OperationController.cpp">
+      <Filter>Sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ImageManager.hpp">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="CLIParser.hpp">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="CommandManager.hpp">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="OperationController.hpp">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="Task.hpp">
+      <Filter>Include</Filter>
+    </ClInclude>
+    <ClInclude Include="KernelWrappers.hpp">
       <Filter>Include</Filter>
     </ClInclude>
   </ItemGroup>
